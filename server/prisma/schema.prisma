@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  habits        Habit[]
+  groups        GroupMember[]
+  messages      GroupMessage[]
+  ownedGroups   Group[]   @relation("GroupOwner")
+  challenges    ChallengeParticipant[]
+  groupAdmins   GroupAdmin[]
+}
+
+model Habit {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  targetCount Int       @default(1) // Daily target (e.g., "3 glasses of water")
+  color       String    @default("blue.400") // For UI
+  createdAt   DateTime  @default(now())
+
+  // Relationships
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id])
+  logs        HabitLog[]
+  streaks     Streak[]
+}
+
+model HabitLog {
+  id        Int      @id @default(autoincrement())
+  date      DateTime @default(now())
+  completed Boolean  @default(false)
+  count     Int      @default(1) // For quantitative habits
+
+  // Relationships
+  habitId   Int
+  habit     Habit    @relation(fields: [habitId], references: [id])
+}
+
+model Streak {
+  id             Int      @id @default(autoincrement())
+  currentStreak  Int      @default(0)
+  longestStreak  Int      @default(0)
+  lastUpdated    DateTime @default(now())
+
+  // Relationships
+  habitId        Int
+  habit          Habit    @relation(fields: [habitId], references: [id])
+}
+
+model Group {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+
+  ownerId Int
+  owner   User      @relation(fields: [ownerId], references: [id], name: "GroupOwner")
+
+  admins   GroupAdmin[]
+  members  GroupMember[]
+  messages GroupMessage[]
+  challenges GroupChallenge[]
+}
+
+model GroupAdmin {
+  id      Int   @id @default(autoincrement())
+  userId  Int
+  groupId Int
+  user    User  @relation(fields: [userId], references: [id])
+  group   Group @relation(fields: [groupId], references: [id])
+
+  @@unique([userId, groupId])
+}
+
+model GroupMember {
+  id        Int     @id @default(autoincrement())
+  joinedAt  DateTime @default(now())
+
+  // Relationships
+  userId    Int
+  user      User    @relation(fields: [userId], references: [id])
+  groupId   Int
+  group     Group   @relation(fields: [groupId], references: [id])
+}
+
+model GroupMessage {
+  id        Int      @id @default(autoincrement())
+  text      String
+  sentAt    DateTime @default(now())
+
+  // Relationships
+  senderId  Int
+  sender    User     @relation(fields: [senderId], references: [id])
+  groupId   Int
+  group     Group    @relation(fields: [groupId], references: [id])
+}
+
+model GroupChallenge {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String
+  startDate   DateTime
+  endDate     DateTime
+  target      Int       // e.g., "Complete 30 habits in 7 days"
+
+  // Relationships
+  groupId     Int
+  group       Group     @relation(fields: [groupId], references: [id])
+  participants ChallengeParticipant[]
+}
+
+model ChallengeParticipant {
+  id             Int      @id @default(autoincrement())
+  completedCount Int      @default(0)
+
+  // Relationships
+  userId         Int
+  user           User     @relation(fields: [userId], references: [id])
+  challengeId    Int
+  challenge      GroupChallenge @relation(fields: [challengeId], references: [id])
+}
+
+model Otp {
+  id        Int      @id @default(autoincrement())
+  email     String
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model RevokedToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  revokedAt DateTime @default(now())
+}
