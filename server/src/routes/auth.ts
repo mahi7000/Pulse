@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
@@ -13,25 +13,44 @@ const OTP_EXPIRY_MINUTES = 10;
 
 // Setup mail transporter (use your SMTP provider or Gmail)
 const transporter = nodemailer.createTransport({
-  service: "gmail", // or use custom SMTP
+  service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
 
+// Request body types
+interface SendOtpBody {
+  email: string;
+}
+
+interface VerifyOtpBody {
+  email: string;
+  otp: string;
+  password: string;
+  name: string;
+}
+
+interface CheckUserBody {
+  email: string;
+}
+
+interface LoginBody {
+  email: string;
+  password: string;
+}
+
 // -------------------------
 // Step 1: Send OTP
 // -------------------------
-router.post("/send-otp", async (req, res) => {
+router.post("/send-otp", async (req: Request<{}, {}, SendOtpBody>, res: Response) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "Email required" });
 
-    // Generate 6-digit OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Save OTP in DB
     await prisma.otp.create({
       data: {
         email,
@@ -40,7 +59,6 @@ router.post("/send-otp", async (req, res) => {
       },
     });
 
-    // Send email
     await transporter.sendMail({
       from: `"Pulse" <${process.env.EMAIL_USER}>`,
       to: email,
@@ -58,7 +76,7 @@ router.post("/send-otp", async (req, res) => {
 // -------------------------
 // Step 2: Verify OTP & Create Account
 // -------------------------
-router.post("/verify-otp", async (req, res) => {
+router.post("/verify-otp", async (req: Request<{}, {}, VerifyOtpBody>, res: Response) => {
   try {
     const { email, otp, password, name } = req.body;
 
@@ -76,18 +94,14 @@ router.post("/verify-otp", async (req, res) => {
       return res.status(400).json({ error: "OTP expired" });
     }
 
-    // Hash password
     const hashed = await bcrypt.hash(password, 10);
 
-    // Create user
     const user = await prisma.user.create({
       data: { email, password: hashed, name },
     });
 
-    // Delete OTP after use
     await prisma.otp.delete({ where: { id: record.id } });
 
-    // Generate token
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
@@ -97,8 +111,10 @@ router.post("/verify-otp", async (req, res) => {
   }
 });
 
+// -------------------------
 // Check if user exists
-router.post("/check-user", async (req, res) => {
+// -------------------------
+router.post("/check-user", async (req: Request<{}, {}, CheckUserBody>, res: Response) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: "Email required" });
 
@@ -106,11 +122,10 @@ router.post("/check-user", async (req, res) => {
   res.json({ exists: !!user });
 });
 
-
 // -------------------------
-// Login (same as before)
+// Login
 // -------------------------
-router.post("/login", async (req, res) => {
+router.post("/login", async (req: Request<{}, {}, LoginBody>, res: Response) => {
   try {
     const { email, password } = req.body;
 
@@ -128,7 +143,10 @@ router.post("/login", async (req, res) => {
   }
 });
 
-router.post("/logout", requireAuth, async (req: AuthRequest, res) => {
+// -------------------------
+// Logout (Protected)
+// -------------------------
+router.post("/logout", requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(400).json({ error: "No token found" });
@@ -144,7 +162,7 @@ router.post("/logout", requireAuth, async (req: AuthRequest, res) => {
 // -------------------------
 // Profile (Protected)
 // -------------------------
-router.get("/me", requireAuth, async (req: AuthRequest, res) => {
+router.get("/me", requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
 
@@ -160,6 +178,5 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
     res.status(500).json({ error: "Failed to fetch profile" });
   }
 });
-
 
 export default router;
