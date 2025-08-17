@@ -23,7 +23,7 @@ export const io = new Server(server, {
 
 // Middleware
 app.use(cors({
-  origin: ['https://pulse-habit-tracker.vercel.app'],
+  origin: ['https://pulse-habit-tracker.vercel.app', 'http://localhost:5173'],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
