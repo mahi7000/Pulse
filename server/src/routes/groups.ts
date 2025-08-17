@@ -276,6 +276,77 @@ router.get(
 );
 
 // -------------------------
+// Send a message to a group
+// -------------------------
+router.post(
+  "/:groupId/messages",
+  requireAuth,
+  async (
+    req: AuthRequest & Request<{ groupId: string }, {}, SendMessageBody>,
+    res: Response
+  ) => {
+    try {
+      const groupId = Number(req.params.groupId);
+      const { text } = req.body;
+      const userId = req.userId!;
+
+      // Validate input
+      if (!text || !text.trim()) {
+        return res.status(400).json({ error: "Message text cannot be empty" });
+      }
+
+      // Check if user is a member of the group
+      const isMember = await prisma.groupMember.findFirst({
+        where: { groupId, userId }
+      });
+
+      const isAdmin = await prisma.groupAdmin.findFirst({
+        where: { groupId, userId }
+      });
+
+      const group = await prisma.group.findUnique({
+        where: { id: groupId }
+      });
+
+      if (!group) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+
+      if (!isMember && !isAdmin && group.ownerId !== userId) {
+        return res.status(403).json({ error: "You are not a member of this group" });
+      }
+
+      // Create the message
+      const message = await prisma.groupMessage.create({
+        data: {
+          text: text.trim(),
+          groupId,
+          senderId: userId,
+          sentAt: new Date()
+        },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          }
+        }
+      });
+
+      // Emit to Socket.IO room
+      io.to(`group-${groupId}`).emit("newMessage", message);
+
+      res.status(201).json(message);
+    } catch (err) {
+      console.error("Error sending message:", err);
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  }
+);
+
+// -------------------------
 // Get messages for a group
 // -------------------------
 router.get(
