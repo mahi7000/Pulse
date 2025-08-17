@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import type { ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { Plus, Target, Users, Search } from 'lucide-react';
+import { Plus, Target, Users } from 'lucide-react';
 import { HabitCard } from '../components/HabitCard';
 import { GroupCard } from '../components/GroupCard';
 import type { Habit, Group } from '../types/types';
@@ -46,6 +46,8 @@ export const Home = () => {
       }
     };
     loadHabitsAndGroups();
+
+    if (loading) console.log("Loading...");
   }, [token]);
 
   // Search handlers

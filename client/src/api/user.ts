@@ -1,6 +1,5 @@
 // src/api/user.ts
 import API from "../api";
-import { useAuth } from "../context/AuthContext";
 
 export interface UserProfile {
   id: number;
