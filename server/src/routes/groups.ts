@@ -76,6 +76,33 @@ router.get("/", requireAuth, async (req: AuthRequest, res: Response) => {
 });
 
 // -------------------------
+// Get all groups the user does NOT belong to
+// -------------------------
+router.get("/explore", requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const groups = await prisma.group.findMany({
+      where: {
+        AND: [
+          { ownerId: { not: req.userId } },
+          { members: { none: { userId: req.userId } } },
+          { admins: { none: { userId: req.userId } } },
+        ],
+      },
+      include: {
+        members: { include: { user: true } },
+        admins: { include: { user: true } },
+        owner: true,
+      },
+    });
+
+    res.json(groups);
+  } catch (err) {
+    console.error("Error fetching groups user does NOT belong to:", err);
+    res.status(500).json({ error: "Failed to fetch groups" });
+  }
+});
+
+// -------------------------
 // Edit a group
 // -------------------------
 router.patch(
