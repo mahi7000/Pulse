@@ -34,6 +34,30 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
   }
 });
 
+// Get all groups for the logged-in user
+router.get("/", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const groups = await prisma.group.findMany({
+      where: {
+        OR: [
+          { ownerId: req.userId },
+          { members: { some: { userId: req.userId } } },
+        ],
+      },
+      include: {
+        members: { include: { user: true } },
+        admins: { include: { user: true } },
+      },
+    });
+
+    res.json(groups); // <- returns an array
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch groups" });
+  }
+});
+
+
 // Edit a group
 router.patch("/:groupId", requireAuth, async (req: AuthRequest, res) => {
   try {
@@ -94,6 +118,32 @@ router.delete("/:groupId", requireAuth, async (req: AuthRequest, res) => {
 });
 
 
+// -------------------------
+// Get all groups the user does NOT belong to
+// -------------------------
+router.get("/explore", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const groups = await prisma.group.findMany({
+      where: {
+        AND: [
+          { ownerId: { not: req.userId } },
+          { members: { none: { userId: req.userId } } },
+          { admins: { none: { userId: req.userId } } },
+        ],
+      },
+      include: {
+        members: { include: { user: true } },
+        admins: { include: { user: true } },
+        owner: true,
+      },
+    });
+
+    res.json(groups);
+  } catch (err) {
+    console.error("Error fetching groups user does NOT belong to:", err);
+    res.status(500).json({ error: "Failed to fetch groups" });
+  }
+});
 
 // Add member
 router.post("/:groupId/members", requireAuth, async (req: AuthRequest, res) => {
@@ -214,23 +264,28 @@ router.get("/:groupId/messages", requireAuth, async (req: AuthRequest, res) => {
     res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
-
 // Send a message
 router.post("/:groupId/messages", requireAuth, async (req: AuthRequest, res) => {
   try {
     const groupId = Number(req.params.groupId);
     const { text } = req.body;
 
+    // Validate text
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return res.status(400).json({ error: "Message text is required" });
+    }
+
     // Only members or admins can send messages
     const isMember = await prisma.groupMember.findFirst({ where: { groupId, userId: req.userId } });
     const isAdmin = await prisma.groupAdmin.findFirst({ where: { groupId, userId: req.userId } });
     const group = await prisma.group.findUnique({ where: { id: groupId } });
+
     if (!group || (!isMember && !isAdmin && group.ownerId !== req.userId)) {
       return res.status(403).json({ error: "Not authorized to send message" });
     }
 
     const message = await prisma.groupMessage.create({
-      data: { groupId, senderId: req.userId!, text },
+      data: { groupId, senderId: req.userId!, text: text.trim() },
       include: { sender: { select: { id: true, name: true, email: true } } },
     });
 
@@ -243,6 +298,7 @@ router.post("/:groupId/messages", requireAuth, async (req: AuthRequest, res) => 
     res.status(500).json({ error: "Failed to send message" });
   }
 });
+
 
 // Edit a message
 router.patch("/:groupId/messages/:messageId", requireAuth, async (req: AuthRequest, res) => {
@@ -299,5 +355,31 @@ router.delete("/:groupId/messages/:messageId", requireAuth, async (req: AuthRequ
   }
 });
 
+// Join a group (self-join from Explore)
+router.post("/:groupId/join", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const groupId = Number(req.params.groupId);
+
+    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) return res.status(404).json({ error: "Group not found" });
+
+    // Check if already a member
+    const existingMember = await prisma.groupMember.findFirst({
+      where: { groupId, userId: req.userId },
+    });
+    if (existingMember) {
+      return res.status(400).json({ error: "You are already a member of this group" });
+    }
+
+    const member = await prisma.groupMember.create({
+      data: { groupId, userId: req.userId! },
+    });
+
+    res.json(member);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to join group" });
+  }
+});
 
 export default router;

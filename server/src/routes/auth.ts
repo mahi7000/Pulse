@@ -97,6 +97,16 @@ router.post("/verify-otp", async (req, res) => {
   }
 });
 
+// Check if user exists
+router.post("/check-user", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: "Email required" });
+
+  const user = await prisma.user.findUnique({ where: { email } });
+  res.json({ exists: !!user });
+});
+
+
 // -------------------------
 // Login (same as before)
 // -------------------------
