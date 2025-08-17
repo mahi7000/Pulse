@@ -112,7 +112,10 @@ class GroupChatPage extends Component<GroupChatPageProps, GroupChatPageState> {
 
     this.disconnectSocket();
 
-    this.socket = io("http://localhost:5000", { auth: { token } });
+    this.socket = io(import.meta.env.VITE_API_BASE_URL, { 
+      auth: { token },
+      transports: ["websocket"] // Force WebSocket protocol
+    });
 
     this.socket.on("connect", () => {
       console.log(`Connected: ${this.socket?.id}`);
