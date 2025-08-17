@@ -1,12 +1,13 @@
 {
   "type": "module",
   "scripts": {
-    "dev": "ts-node-esm src/index.ts",
-    "build": "tsc",
-    "start": "nodemon dist/index.js",
+    "dev": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/index.ts",
+    "build": "tsc && cp package.json dist/ && cp -r prisma dist/",
+    "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
+  "postinstall": "prisma generate",
   "dependencies": {
     "@prisma/client": "^6.14.0",
     "bcrypt": "^6.0.0",
