@@ -1,12 +1,15 @@
 import { Fragment, useState } from 'react'
 import { Menu, Transition, Dialog } from '@headlessui/react'
 import { Menu as MenuIcon, X as CloseIcon, Moon, Sun, User } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
+import { useAuth } from '../context/AuthContext'
 
 const Header = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const { darkMode, toggleDarkMode } = useTheme();  
+  const { darkMode, toggleDarkMode } = useTheme();
+  const navigate = useNavigate();
+  const { logout } = useAuth();
   
   const user = {
     name: 'John Doe',
@@ -19,6 +22,11 @@ const Header = () => {
     { name: 'Habits', href: '/habits' },
     { name: 'Groups', href: '/groups' },
   ]
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/90 backdrop-blur-md transition-colors duration-300 dark:bg-gray-900/90">
@@ -107,7 +115,7 @@ const Header = () => {
                     {({ active }) => (
                       <button
                         className={`w-full text-left px-4 py-2 text-sm rounded ${active ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
-                        onClick={() => console.log('Logging out...')}
+                        onClick={handleLogout}
                       >
                         Sign out
                       </button>
@@ -183,7 +191,7 @@ const Header = () => {
                   </Link>
                   <button
                     className="w-full text-left rounded-lg px-3 py-2 text-base font-medium hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => setMobileMenuOpen(false)}
+                    onClick={handleLogout}
                   >
                     Sign out
                   </button>

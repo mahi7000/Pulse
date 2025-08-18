@@ -5,14 +5,15 @@ import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { fetchGroups, fetchExploreGroups, createGroup, joinGroup } from "../api/groups";
 import { useAuth } from "../context/AuthContext";
+import Loading from "../components/Loading";
 
 const GROUPS_PER_PAGE = 6;
 
 function withNavigateAndAuth(ComponentClass: any) {
   return function Wrapper(props: any) {
     const navigate = useNavigate();
-    const { token } = useAuth();
-    return <ComponentClass {...props} navigate={navigate} token={token} />;
+    const { token, isLoading: isAuthLoading } = useAuth();
+    return <ComponentClass {...props} navigate={navigate} token={token} isAuthLoading={isAuthLoading} />;
   };
 }
 
@@ -20,15 +21,16 @@ class GroupListPage extends Component<any, any> {
   constructor(props: any) {
     super(props);
     this.state = {
-      groups: [] as any[],
-      exploreGroups: [] as any[],
-      filteredGroups: [] as any[],
-      filteredExploreGroups: [] as any[],
+      groups: [],
+      exploreGroups: [],
+      filteredGroups: [],
+      filteredExploreGroups: [],
       groupPage: 1,
       explorePage: 1,
       groupSearch: "",
       exploreSearch: "",
       loading: true,
+      error: null,
     };
   }
 
@@ -36,32 +38,47 @@ class GroupListPage extends Component<any, any> {
     this.loadGroups();
   }
 
+  componentDidUpdate(prevProps: any) {
+    if (prevProps.isAuthLoading !== this.props.isAuthLoading || prevProps.token !== this.props.token) {
+      this.loadGroups();
+    }
+  }
+
   loadGroups = async () => {
+    if (this.props.isAuthLoading) return;
+    if (!this.props.token) {
+      this.setState({ 
+        loading: false,
+        error: "You must be logged in to view groups"
+      });
+      return;
+    }
+
     try {
+      this.setState({ loading: true, error: null });
       const [myGroups, otherGroups] = await Promise.all([
         fetchGroups(this.props.token),
         fetchExploreGroups(this.props.token),
       ]);
 
-      const groupsArray = Array.isArray(myGroups) ? myGroups : [];
-      const exploreArray = Array.isArray(otherGroups) ? otherGroups : [];
-
       this.setState({
-        groups: groupsArray,
-        exploreGroups: exploreArray,
-        filteredGroups: groupsArray,
-        filteredExploreGroups: exploreArray,
+        groups: Array.isArray(myGroups) ? myGroups : [],
+        exploreGroups: Array.isArray(otherGroups) ? otherGroups : [],
+        filteredGroups: Array.isArray(myGroups) ? myGroups : [],
+        filteredExploreGroups: Array.isArray(otherGroups) ? otherGroups : [],
         loading: false,
       });
     } catch (err) {
-      toast.error("Failed to load groups");
+      console.error(err);
       this.setState({
+        loading: false,
+        error: "Failed to load groups",
         groups: [],
         exploreGroups: [],
         filteredGroups: [],
         filteredExploreGroups: [],
-        loading: false,
       });
+      toast.error("Failed to load groups");
     }
   };
 
@@ -77,6 +94,7 @@ class GroupListPage extends Component<any, any> {
       }));
       toast.success("Group created!");
     } catch (err) {
+      console.error(err);
       toast.error("Failed to create group");
     }
   };
@@ -88,14 +106,12 @@ class GroupListPage extends Component<any, any> {
   handleJoinGroup = async (groupId: number) => {
     try {
       const joinedGroup = await joinGroup(this.props.token, groupId);
-
       this.setState((prev: any) => ({
         groups: [joinedGroup, ...prev.groups],
         filteredGroups: [joinedGroup, ...prev.filteredGroups],
         exploreGroups: prev.exploreGroups.filter((g: any) => g.id !== groupId),
         filteredExploreGroups: prev.filteredExploreGroups.filter((g: any) => g.id !== groupId),
       }));
-
       toast.success(`Joined group "${joinedGroup.name}"!`);
     } catch (err) {
       console.error(err);
@@ -129,10 +145,12 @@ class GroupListPage extends Component<any, any> {
       groupSearch,
       exploreSearch,
       loading,
+      error,
     } = this.state;
 
-    if (loading) return <p className="p-6">Loading...</p>;
-
+    if (this.props.isAuthLoading) return <Loading />;
+    if (error) return <p className="p-6 text-red-500">{error}</p>;
+    if (loading) return <Loading />;
     const paginatedGroups = filteredGroups.slice(
       (groupPage - 1) * GROUPS_PER_PAGE,
       groupPage * GROUPS_PER_PAGE
@@ -150,6 +168,7 @@ class GroupListPage extends Component<any, any> {
           <button
             onClick={this.handleCreateGroup}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            disabled={!this.props.token}
           >
             Create Group
           </button>
@@ -217,7 +236,7 @@ class GroupListPage extends Component<any, any> {
                   group={group}
                   onClick={() => this.handleGroupClick(group.id)}
                   isExplore={true}
-                  onJoin={() => this.handleJoinGroup(group.id) }
+                  onJoin={() => this.handleJoinGroup(group.id)}
                 />
               </div>
             ))}

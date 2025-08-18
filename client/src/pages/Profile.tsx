@@ -2,14 +2,17 @@ import { useEffect, useState } from "react";
 import { fetchProfile } from "../api/user";
 import type { UserProfile } from "../api/user";
 import { useAuth } from "../context/AuthContext";
+import Loading from "../components/Loading";
 
 export const ProfilePage = () => {
-  const { token } = useAuth();
+  const { token, isLoading: isAuthLoading } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isAuthLoading) return;
+
     const loadProfile = async () => {
       if (!token) {
         setError("You must be logged in to view this page");
@@ -32,7 +35,8 @@ export const ProfilePage = () => {
     loadProfile();
   }, [token]);
 
-  if (loading) return <p>Loading profile...</p>;
+  if (isAuthLoading) return <Loading />;
+  if (loading) return <Loading />;
   if (error) return <p className="text-red-500">{error}</p>;
 
   return (

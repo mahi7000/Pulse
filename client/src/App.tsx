@@ -3,13 +3,15 @@ import Header from "./components/Header";
 import { Home } from "./pages/Home";
 import Signup from "./pages/Signup";
 import Login from "./pages/Login";
-import { RedirectIfAuth } from "./components/RedirectIfAuth";
 import { HabitsPage } from "./pages/Habits";
 import { ProfilePage } from "./pages/Profile";
 import { AuthProvider } from "./context/AuthContext";
 import { CreateHabitPage } from "./pages/CreateHabit";
 import GroupListPage from "./pages/GroupListPage";
 import GroupChatPage  from "./pages/GroupChat";
+import NotFound from "./pages/NotFound";
+import PublicRoute from "./components/PublicRoute";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 function AppContent() {
   const location = useLocation();
@@ -21,26 +23,53 @@ function AppContent() {
       {!hideHeader && <Header />}
       <main>
         <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/habits" element={<HabitsPage />} />
-          <Route path="/habits/new" element={<CreateHabitPage />} />
-          <Route path="/groups" element={<GroupListPage />} />
-          <Route path="/groups/:groupId" element={<GroupChatPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/" element={
+            <ProtectedRoute>
+              <Home />
+            </ProtectedRoute>
+           } />
+          <Route path="/habits" element={
+            <ProtectedRoute>
+              <HabitsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/habits/new" element={
+            <ProtectedRoute>
+              <CreateHabitPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/groups" element={
+            <ProtectedRoute>
+              <GroupListPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/groups/:groupId" element={
+           <ProtectedRoute>
+            <GroupChatPage />
+           </ProtectedRoute>
+          } />
+          <Route path="/profile" element={
+            <ProtectedRoute>
+              <ProfilePage />
+            </ProtectedRoute>
+          } />
           <Route
             path="/login"
             element={
+              <PublicRoute>
                 <Login />
+              </PublicRoute>
             }
           />
           <Route
             path="/signup"
             element={
-              <RedirectIfAuth>
+              <PublicRoute>
                 <Signup />
-              </RedirectIfAuth>
+              </PublicRoute>
             }
           />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
     </div>

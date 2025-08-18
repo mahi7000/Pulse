@@ -4,6 +4,8 @@ import toast from "react-hot-toast";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import io, { Socket } from "socket.io-client";
+import Loading from "../components/Loading";
+import { format, parseISO, isValid } from "date-fns";
 
 interface User {
   id: number;
@@ -16,6 +18,8 @@ interface Message {
   text: string;
   sender: User;
   createdAt: string;
+  isSending?: boolean;
+  tempId?: string;
 }
 
 interface Group {
@@ -24,15 +28,10 @@ interface Group {
   description: string;
 }
 
-interface AuthProps {
-  user: User | null;
-  token: string | null;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
-}
-
 interface GroupChatPageProps {
-  auth: AuthProps;
+  token: string | null;
+  user: User | null;
+  isAuthLoading: boolean;
   params: { groupId: string };
 }
 
@@ -41,25 +40,21 @@ interface GroupChatPageState {
   messages: Message[];
   newMessage: string;
   loading: boolean;
+  error: string | null;
 }
 
-function withRouter(ComponentClass: any) {
+function withRouterAndAuth(ComponentClass: any) {
   return function Wrapper(props: any) {
     const params = useParams();
-    return <ComponentClass {...props} params={params} />;
-  };
-}
-
-function withAuth(ComponentClass: any) {
-  return function Wrapper(props: any) {
-    const auth = useAuth();
-    return <ComponentClass {...props} auth={auth} />;
+    const { token, user, isLoading: isAuthLoading } = useAuth();
+    return <ComponentClass {...props} params={params} token={token} user={user} isAuthLoading={isAuthLoading} />;
   };
 }
 
 class GroupChatPage extends Component<GroupChatPageProps, GroupChatPageState> {
   private socket: typeof Socket | null = null;
   private messagesEndRef = createRef<HTMLDivElement>();
+  private messagesContainerRef = createRef<HTMLDivElement>();
 
   constructor(props: GroupChatPageProps) {
     super(props);
@@ -68,6 +63,7 @@ class GroupChatPage extends Component<GroupChatPageProps, GroupChatPageState> {
       messages: [],
       newMessage: "",
       loading: true,
+      error: null,
     };
   }
 
@@ -76,57 +72,96 @@ class GroupChatPage extends Component<GroupChatPageProps, GroupChatPageState> {
     this.initSocket();
   }
 
+  componentDidUpdate(prevProps: GroupChatPageProps) {
+    if (prevProps.token !== this.props.token || 
+        prevProps.isAuthLoading !== this.props.isAuthLoading ||
+        prevProps.params.groupId !== this.props.params.groupId) {
+      this.loadGroupAndMessages();
+      this.initSocket();
+    }
+  }
+
   componentWillUnmount() {
     this.disconnectSocket();
   }
 
-  // Fetch group info and messages
   loadGroupAndMessages = async () => {
     const { groupId } = this.props.params;
-    const { token } = this.props.auth;
+    const { token, isAuthLoading } = this.props;
 
-    if (!groupId || !token) {
-      toast.error("Missing group or authentication.");
-      this.setState({ loading: false });
+    if (isAuthLoading) return;
+    if (!token) {
+      this.setState({ 
+        loading: false,
+        error: "You must be logged in to view this chat"
+      });
       return;
     }
 
     try {
-      const group = await fetchGroup(token, Number(groupId));
-      const messages = await fetchMessages(token, Number(groupId));
-      this.setState({ group, messages });
-      this.scrollToBottom();
+      this.setState({ loading: true, error: null });
+      const [group, messages] = await Promise.all([
+        fetchGroup(token, Number(groupId)),
+        fetchMessages(token, Number(groupId))
+      ]);
+      
+      const processedMessages = messages.map((msg: any) => ({
+        ...msg,
+        createdAt: this.normalizeDate(msg.createdAt)
+      }));
+      
+      this.setState({ group, messages: processedMessages }, () => {
+        this.scrollToBottom(true);
+      });
     } catch (err) {
       console.error(err);
+      this.setState({ error: "Failed to load group or messages" });
       toast.error("Failed to load group or messages");
     } finally {
       this.setState({ loading: false });
     }
   };
 
-  // Initialize Socket.IO connection
+  normalizeDate = (dateString: string): string => {
+    const isoDate = new Date(dateString);
+    if (!isNaN(isoDate.getTime())) return dateString;
+    
+    const timestamp = Date.parse(dateString);
+    if (!isNaN(timestamp)) return new Date(timestamp).toISOString();
+    
+    console.warn(`Invalid date string: ${dateString}, using current time instead`);
+    return new Date().toISOString();
+  };
+
   initSocket = () => {
     const { groupId } = this.props.params;
-    const { token } = this.props.auth;
-    if (!groupId || !token) return;
-
+    const { token, isAuthLoading } = this.props;
+    
+    if (isAuthLoading || !token || !groupId) return;
     this.disconnectSocket();
 
     this.socket = io(import.meta.env.VITE_API_BASE_URL, { 
       auth: { token },
-      transports: ["websocket"] // Force WebSocket protocol
+      transports: ["websocket"]
     });
 
     this.socket.on("connect", () => {
-      console.log(`Connected: ${this.socket?.id}`);
-      // Join the group room after connection
-      this.socket?.emit("joinGroup", Number(groupId), () => {
-        console.log(`Joined group-${groupId} room`);
-      });
+      this.socket?.emit("joinGroup", Number(groupId));
     });
 
-    this.socket.on("newMessage", this.handleNewMessage);
-
+    this.socket.on("newMessage", (msg: Message) => {
+      // Skip if this is our own optimistic message
+      if (!msg.tempId && !this.state.messages.some(m => 
+        m.id === msg.id || 
+        (m.tempId && m.text === msg.text && m.sender.id === msg.sender.id)
+      )) {
+        this.handleNewMessage({
+          ...msg,
+          createdAt: this.normalizeDate(msg.createdAt)
+        });
+      }
+    });
+    
     this.socket.on("connect_error", (err: Error) => {
       console.error("Socket.IO error:", err.message);
       toast.error("WebSocket connection failed");
@@ -144,42 +179,85 @@ class GroupChatPage extends Component<GroupChatPageProps, GroupChatPageState> {
   handleNewMessage = (msg: Message) => {
     this.setState(
       (prev) => ({ messages: [...prev.messages, msg] }),
-      this.scrollToBottom
+      () => this.scrollToBottom()
     );
   };
 
-  scrollToBottom = () => {
-    this.messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  scrollToBottom = (instant = false) => {
+    const container = this.messagesContainerRef.current;
+    const endMarker = this.messagesEndRef.current;
+    
+    if (container && endMarker) {
+      if (instant) {
+        endMarker.scrollIntoView();
+      } else {
+        // Only scroll if user is near the bottom
+        const { scrollTop, scrollHeight, clientHeight } = container;
+        const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+        
+        if (distanceFromBottom < 200) {
+          endMarker.scrollIntoView({ behavior: "smooth" });
+        }
+      }
+    }
   };
 
   handleSendMessage = async () => {
-  const { newMessage, messages } = this.state;
-  const { user, token } = this.props.auth;
-  const { groupId } = this.props.params;
+    const { newMessage } = this.state;
+    const { token, user } = this.props;
+    const { groupId } = this.props.params;
 
-  if (!newMessage || !newMessage.trim()) {
-    toast.error("Cannot send an empty message");
-    return;
-  }
+    if (!newMessage.trim()) {
+      toast.error("Cannot send an empty message");
+      return;
+    }
 
-  if (!user || !token) {
-    toast.error("You must be logged in to send messages");
-    return;
-  }
+    if (!token || !user) {
+      toast.error("You must be logged in to send messages");
+      return;
+    }
 
-  try {
-    const message = await sendMessage(token, Number(groupId), newMessage.trim());
-    this.setState({ 
-      messages: [...messages, message], 
-      newMessage: "" 
-    });
-    this.scrollToBottom();
-  } catch (err: any) {
-    console.error(err);
-    toast.error(err.response?.data?.error || "Failed to send message");
-  }
-};
+    // Create optimistic message
+    const tempMessage: Message = {
+      id: -1,
+      tempId: `temp-${Date.now()}`,
+      text: newMessage.trim(),
+      sender: user,
+      createdAt: new Date().toISOString(),
+      isSending: true
+    };
 
+    this.setState(prev => ({
+      messages: [...prev.messages, tempMessage],
+      newMessage: ""
+    }), () => this.scrollToBottom());
+
+    try {
+      const message = await sendMessage(token, Number(groupId), newMessage.trim());
+      
+      // Replace temporary message with real one
+      this.setState(prev => ({
+        messages: prev.messages.map(msg => 
+          msg.tempId === tempMessage.tempId 
+            ? { ...message, createdAt: this.normalizeDate(message.createdAt) }
+            : msg
+        )
+      }));
+    } catch (err: any) {
+      console.error(err);
+      
+      // Mark message as failed
+      this.setState(prev => ({
+        messages: prev.messages.map(msg => 
+          msg.tempId === tempMessage.tempId 
+            ? { ...msg, isSending: false, text: `${msg.text} (Failed to send)` }
+            : msg
+        )
+      }));
+      
+      toast.error(err.response?.data?.error || "Failed to send message");
+    }
+  };
 
   handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -188,70 +266,142 @@ class GroupChatPage extends Component<GroupChatPageProps, GroupChatPageState> {
     }
   };
 
-  render() {
-    const { group, messages, newMessage, loading } = this.state;
-    const { user } = this.props.auth;
+  formatMessageTime = (dateString: string) => {
+    try {
+      const date = parseISO(dateString);
+      if (isValid(date)) return format(date, 'h:mm a');
+      return format(new Date(dateString), 'h:mm a');
+    } catch (e) {
+      console.warn("Failed to format date:", dateString, e);
+      return "Just now";
+    }
+  };
 
-    if (loading) return <div className="p-6">Loading...</div>;
+  render() {
+    const { group, messages, newMessage, loading, error } = this.state;
+    const { user, isAuthLoading } = this.props;
+
+    if (isAuthLoading) return <Loading />;
+    if (error) return <div className="p-6 text-destructive">{error}</div>;
+    if (loading) return <Loading />;
     if (!group) return <div className="p-6">Group not found</div>;
     if (!user) return <div className="p-6">User not authenticated</div>;
 
     return (
-      <div className="flex flex-col h-screen bg-gray-100 dark:bg-gray-900">
+      <div className="flex flex-col h-screen bg-background text-foreground">
         {/* Header */}
-        <div className="p-4 bg-white dark:bg-gray-800 shadow-md">
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-            {group.name}
-          </h1>
-          <p className="text-gray-600 dark:text-gray-300">{group.description}</p>
+        <div className="p-4 bg-glass border-b border-border shadow-sm sticky top-0 z-10">
+          <div className="max-w-4xl mx-auto">
+            <h1 className="text-xl md:text-2xl font-bold text-gradient-primary bg-clip-text">
+              {group.name}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">{group.description}</p>
+          </div>
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${
-                msg.sender.id === user.id ? "justify-end" : "justify-start"
-              }`}
-            >
+        {/* Messages with custom scrollbar */}
+        <div 
+          ref={this.messagesContainerRef}
+          className="flex-1 overflow-y-auto p-4 space-y-3 max-w-4xl w-full mx-auto scrollbar scrollbar-thin scrollbar-thumb-rounded scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
+        >
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <svg
+                className="w-12 h-12 mb-4 opacity-50"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                />
+              </svg>
+              <p>No messages yet. Start the conversation!</p>
+            </div>
+          ) : (
+            messages.map((msg) => (
               <div
-                className={`max-w-xs md:max-w-md lg:max-w-lg rounded-lg px-4 py-2 ${
-                  msg.sender.id === user.id
-                    ? "bg-blue-600 text-white rounded-br-none"
-                    : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-bl-none"
+                key={msg.tempId || msg.id}
+                className={`flex ${
+                  msg.sender.id === user.id ? "justify-end" : "justify-start"
                 }`}
               >
-                <div className="font-semibold text-sm">{msg.sender.name}</div>
-                <div className="mt-1">{msg.text}</div>
-                <div className="text-right text-xs mt-1 opacity-70">
-                  {new Date(msg.createdAt).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                <div
+                  className={`max-w-xs md:max-w-md lg:max-w-lg rounded-2xl px-4 py-2 shadow-soft transition-opacity ${
+                    msg.sender.id === user.id
+                      ? "bg-blue-500 text-white rounded-br-none"
+                      : "bg-accent text-accent-foreground rounded-bl-none"
+                  } ${msg.isSending ? 'opacity-80' : ''}`}
+                >
+                  {msg.sender.id !== user.id && (
+                    <div className="font-medium text-xs text-muted-foreground">
+                      {msg.sender.name}
+                    </div>
+                  )}
+                  <div className="mt-1 break-words">{msg.text}</div>
+                  <div className="flex items-center justify-between">
+                    <div className={`text-xs mt-1 ${
+                      msg.sender.id === user.id ? "text-primary-foreground/70" : "text-muted-foreground"
+                    }`}>
+                      {msg.isSending ? 'Sending...' : this.formatMessageTime(msg.createdAt)}
+                    </div>
+                    {msg.isSending && (
+                      <div className="ml-2">
+                        <svg className="animate-spin h-3 w-3 text-white" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
           <div ref={this.messagesEndRef} />
         </div>
 
         {/* Input */}
-        <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-          <div className="flex items-center">
-            <input
-              type="text"
-              className="flex-1 border border-gray-300 dark:border-gray-600 rounded-full py-2 px-4 bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={newMessage}
-              placeholder="Type a message..."
-              onChange={(e) => this.setState({ newMessage: e.target.value })}
-              onKeyDown={this.handleKeyDown}
-            />
+        <div className="p-4 bg-glass border-t border-border sticky bottom-0">
+          <div className="max-w-4xl mx-auto flex items-center gap-2">
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                className="w-full border border-border rounded-full py-3 px-5 bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background transition-all"
+                value={newMessage}
+                placeholder="Type your message..."
+                onChange={(e) => this.setState({ newMessage: e.target.value })}
+                onKeyDown={this.handleKeyDown}
+              />
+              {!newMessage && (
+                <div className="absolute right-3 top-3 text-muted-foreground">
+                  <kbd className="px-2 py-1 text-xs rounded bg-muted">Enter</kbd>
+                </div>
+              )}
+            </div>
             <button
-              className="ml-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="bg-blue-500 text-primary-foreground rounded-full p-3 shadow-soft hover:shadow-glow transition-all disabled:opacity-50"
               onClick={this.handleSendMessage}
+              disabled={!newMessage.trim()}
             >
-              Send
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                />
+              </svg>
             </button>
           </div>
         </div>
@@ -260,4 +410,4 @@ class GroupChatPage extends Component<GroupChatPageProps, GroupChatPageState> {
   }
 }
 
-export default withAuth(withRouter(GroupChatPage));
+export default withRouterAndAuth(GroupChatPage);

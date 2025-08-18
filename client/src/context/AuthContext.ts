@@ -20,6 +20,7 @@ export interface AuthContextType {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean;
+  isLoading: boolean,
   login: (token: string, user: User) => void;
   logout: () => void;
 }
@@ -45,6 +46,7 @@ interface AuthProviderProps {
 export const AuthProvider: FunctionComponent<AuthProviderProps> = function(props) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Initialize from localStorage
   useEffect(function() {
@@ -61,7 +63,12 @@ export const AuthProvider: FunctionComponent<AuthProviderProps> = function(props
         localStorage.removeItem("authToken");
       }
     }
+    setIsLoading(false);
   }, []);
+
+  useEffect(() => {
+  console.log("Auth state updated", { user, token, isAuthenticated: Boolean(user && token) });
+}, [user, token]);
 
   const login = function(token: string, user: User): void {
     setUser(user);
@@ -82,6 +89,7 @@ export const AuthProvider: FunctionComponent<AuthProviderProps> = function(props
       user,
       token,
       isAuthenticated: Boolean(user && token),
+      isLoading,
       login,
       logout,
     };
@@ -93,3 +101,4 @@ export const AuthProvider: FunctionComponent<AuthProviderProps> = function(props
     props.children
   );
 };
+
