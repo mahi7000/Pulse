@@ -10,9 +10,9 @@ datasource db {
 
 model User {
   id        Int       @id @default(autoincrement())
-  email     String    @unique
-  password  String
-  name      String
+  email     String    @unique @db.VarChar(255)
+  password  String    @db.VarChar(255)
+  name      String    @db.VarChar(100)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -22,32 +22,39 @@ model User {
   ownedGroups   Group[]   @relation("GroupOwner")
   challenges    ChallengeParticipant[]
   groupAdmins   GroupAdmin[]
+
+  @@index([createdAt])
 }
 
 model Habit {
   id          Int       @id @default(autoincrement())
-  name        String
-  description String?
-  targetCount Int       @default(1) // Daily target (e.g., "3 glasses of water")
-  color       String    @default("blue.400") // For UI
+  name        String    @db.VarChar(100)
+  description String?   @db.VarChar(500)
+  targetCount Int       @default(1)
+  color       String    @default("blue.400") @db.VarChar(20)
   createdAt   DateTime  @default(now())
 
-  // Relationships
   userId      Int
-  user        User      @relation(fields: [userId], references: [id])
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   logs        HabitLog[]
   streaks     Streak[]
+
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model HabitLog {
   id        Int      @id @default(autoincrement())
   date      DateTime @default(now())
   completed Boolean  @default(false)
-  count     Int      @default(1) // For quantitative habits
+  count     Int      @default(1)
 
-  // Relationships
   habitId   Int
-  habit     Habit    @relation(fields: [habitId], references: [id])
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  @@index([habitId, date])
+  @@index([date])
+  @@index([completed])
 }
 
 model Streak {
@@ -56,19 +63,21 @@ model Streak {
   longestStreak  Int      @default(0)
   lastUpdated    DateTime @default(now())
 
-  // Relationships
   habitId        Int
-  habit          Habit    @relation(fields: [habitId], references: [id])
+  habit          Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  @@index([habitId])
+  @@index([lastUpdated])
 }
 
 model Group {
   id          Int       @id @default(autoincrement())
-  name        String
-  description String?
+  name        String    @db.VarChar(100)
+  description String?   @db.VarChar(500)
   createdAt   DateTime  @default(now())
 
   ownerId Int
-  owner   User      @relation(fields: [ownerId], references: [id], name: "GroupOwner")
+  owner   User      @relation(fields: [ownerId], references: [id], name: "GroupOwner", onDelete: Cascade)
 
   admins   GroupAdmin[]
   members  GroupMember[]
@@ -80,8 +89,8 @@ model GroupAdmin {
   id      Int   @id @default(autoincrement())
   userId  Int
   groupId Int
-  user    User  @relation(fields: [userId], references: [id])
-  group   Group @relation(fields: [groupId], references: [id])
+  user    User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@unique([userId, groupId])
 }
@@ -90,60 +99,70 @@ model GroupMember {
   id        Int     @id @default(autoincrement())
   joinedAt  DateTime @default(now())
 
-  // Relationships
   userId    Int
-  user      User    @relation(fields: [userId], references: [id])
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupId   Int
-  group     Group   @relation(fields: [groupId], references: [id])
+  group     Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([groupId])
 }
 
 model GroupMessage {
   id        Int      @id @default(autoincrement())
-  text      String
+  text      String   @db.VarChar(1000)
   sentAt    DateTime @default(now())
 
-  // Relationships
   senderId  Int
-  sender    User     @relation(fields: [senderId], references: [id])
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
   groupId   Int
-  group     Group    @relation(fields: [groupId], references: [id])
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, sentAt])
+  @@index([sentAt])
 }
 
 model GroupChallenge {
   id          Int       @id @default(autoincrement())
-  name        String
-  description String
+  name        String    @db.VarChar(100)
+  description String    @db.VarChar(500)
   startDate   DateTime
   endDate     DateTime
-  target      Int       // e.g., "Complete 30 habits in 7 days"
+  target      Int
 
-  // Relationships
   groupId     Int
-  group       Group     @relation(fields: [groupId], references: [id])
+  group       Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
   participants ChallengeParticipant[]
+
+  @@index([groupId])
+  @@index([startDate, endDate])
 }
 
 model ChallengeParticipant {
   id             Int      @id @default(autoincrement())
   completedCount Int      @default(0)
 
-  // Relationships
   userId         Int
-  user           User     @relation(fields: [userId], references: [id])
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   challengeId    Int
-  challenge      GroupChallenge @relation(fields: [challengeId], references: [id])
+  challenge      GroupChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@index([userId, challengeId])
 }
 
 model Otp {
   id        Int      @id @default(autoincrement())
-  email     String
-  code      String
+  email     String   @db.VarChar(255)
+  code      String   @db.VarChar(10)
   expiresAt DateTime
   createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
 }
 
 model RevokedToken {
   id        Int      @id @default(autoincrement())
-  token     String   @unique
+  token     String   @unique @db.VarChar(500)
   revokedAt DateTime @default(now())
 }
