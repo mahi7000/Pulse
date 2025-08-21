@@ -482,7 +482,7 @@ router.post(
 );
 
 // -------------------------
-// Get messages for a group
+// Get messages for a group (FIXED - returns array for frontend compatibility)
 // -------------------------
 router.get(
   "/:groupId/messages",
@@ -491,35 +491,21 @@ router.get(
     try {
       const groupId = Number(req.params.groupId);
       const userId = req.userId!;
-      const page = Math.max(1, parseInt(req.query.page as string) || 1);
-      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
-      const skip = (page - 1) * limit;
 
       const accessCheck = await checkGroupAccess(groupId, userId);
       if (!accessCheck.hasAccess) {
         return res.status(403).json({ error: "Not authorized to view messages" });
       }
 
-      const [messages, totalCount] = await Promise.all([
-        prisma.groupMessage.findMany({
-          where: { groupId },
-          include: messageInclude,
-          orderBy: { sentAt: "desc" },
-          skip,
-          take: limit,
-        }),
-        prisma.groupMessage.count({ where: { groupId } })
-      ]);
-
-      res.json({
-        messages: messages.reverse(),
-        pagination: {
-          page,
-          limit,
-          total: totalCount,
-          pages: Math.ceil(totalCount / limit)
-        }
+      // Return array directly for frontend compatibility
+      const messages = await prisma.groupMessage.findMany({
+        where: { groupId },
+        include: messageInclude,
+        orderBy: { sentAt: "asc" }, // Chronological order
+        take: 100 // Reasonable limit
       });
+
+      res.json(messages);
     } catch (err) {
       console.error("Get messages error:", err);
       res.status(500).json({ error: "Failed to fetch messages" });
